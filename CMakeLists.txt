@@ -1,0 +1,9 @@
+PROJECT(smashlib)
+
+ADD_LIBRARY(${PROJECT_NAME} SHARED src/main.cpp)
+include_directories(src/include/)
+file(GLOB SOURCES "src/*.cpp")
+
+SET_TARGET_PROPERTIES(${PROJECT_NAME} PROPERTIES FOLDER ${PROJECT_NAME})
+
+TARGET_LINK_LIBRARIES(${PROJECT_NAME} hacklib)
