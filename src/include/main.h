@@ -8,20 +8,13 @@
 
 class SmashMain : public hl::Main
 {
+
 public:
     bool init() override;
     bool step() override;
 
-    const hl::IHook *m_hkMemlo = nullptr;
-
-    uintptr_t nametagRegion = NULL;
-    uintptr_t patchStart = NULL;
-    uintptr_t firstEntity = NULL;
-
 private:
-    void cleanup();
-    void updatePtrs();
+	const hl::IHook *m_serialupdate = nullptr;
 
-    hl::ConsoleEx m_con;
     hl::Hooker m_hooker;
 };
