@@ -15,6 +15,7 @@ public:
 
 private:
 	const hl::IHook *m_serialupdate = nullptr;
+	const hl::IHook *m_serialshutdown = nullptr;
 
     hl::Hooker m_hooker;
 };
