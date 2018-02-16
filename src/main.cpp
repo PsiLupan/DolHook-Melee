@@ -22,7 +22,8 @@ struct Entity
 {
 	uintptr_t entity_addr;
 	char* player_addr;
-	unsigned char player_mem[0x240F];
+	unsigned char player_mem[0x2384];
+	unsigned char saved_mem[0x2384];
 };
 Entity entity[6] = { NULL, NULL, NULL, NULL, NULL, NULL };
 
@@ -42,7 +43,8 @@ void cleanupPlayerPtrs() {
 	for (int i = 0; i < 6; i++) {
 		entity[i].entity_addr = NULL;
 		entity[i].player_addr = NULL;
-		memset(entity[i].player_mem, 0, 0x240F);
+		memset(entity[i].player_mem, 0, 0x2384);
+		memset(entity[i].saved_mem, 0, 0x2384);
 	}
 	m_con.printf("[Core::Cleanup] Invalidated Entities\n");
 }
@@ -83,7 +85,7 @@ void updatePlayerPtrs() {
 			m_con.printf("[INFO] Entity %d MEM1: %p\n", i + 1, _byteswap_ulong(*addr));
 
 			addr = reinterpret_cast<uint32_t*>(entity[i].entity_addr + 0x2C); //Now we'll jump to their player struct
-			entity[i].player_addr = reinterpret_cast<char*>((uintptr_t)getPointer(_byteswap_ulong(*addr) + 0x10)); //Start at 0x10 of the player struct, since everything prior isn't going to change
+			entity[i].player_addr = reinterpret_cast<char*>((uintptr_t)getPointer(_byteswap_ulong(*addr))); //Start at 0x10 of the player struct, since everything prior isn't going to change
 		}
 	}
 }
@@ -91,7 +93,7 @@ void updatePlayerPtrs() {
 void updateEntities() {
 	for (int i = 0; i < 6; i++) {
 		if (entity[i].entity_addr != NULL) {
-			memcpy(&entity[i].player_mem, entity[i].player_addr, 0x240F);
+			memcpy(&entity[i].player_mem, entity[i].player_addr, 0x2384);
 		}
 		else {
 			break;
@@ -176,6 +178,8 @@ bool SmashMain::init() {
 	}
 	m_con.printf("[Core::Init] SerialInterface::Shutdown() hook successful\n");
 
+	cleanupPlayerPtrs();
+
 	return true;
 }
 /* Step occurs every 10ms, so don't rely on this for sending packets on frame.
@@ -188,6 +192,56 @@ bool SmashMain::step() {
 		cleanup();
 		return false;
 	}
+	if (GetAsyncKeyState(VK_HOME)) {
+		for (uint16_t i = 0; i < 6; i++) {
+			if (entity[i].player_addr != NULL) {
+				uint32_t chid = *reinterpret_cast<uint32_t*>(entity[i].player_addr + 0x04); //Load the character ID
+				uint32_t as = *reinterpret_cast<uint32_t*>(entity[i].player_addr + 0x10); //Load the action state
 
+				switch (_byteswap_ulong(chid)) {
+				case 0xd: //Samus
+					if (*reinterpret_cast<uint32_t*>(entity[i].player_addr + 0x223c) != 0) { //Grappled Entity
+						return true;
+					}
+					break;
+
+				case 0x6:
+				case 0x14:
+					if (*reinterpret_cast<uint32_t*>(entity[i].player_addr + 0x2238) != 0) { //Grappled Entity
+						return true;
+					}
+					break;
+
+				default:
+					break;
+				}
+
+				switch (_byteswap_ulong(as)) {
+				case 0xC: //Rebirth
+				case 0xD: //RebirthWait
+				case 0x142: //Entry
+				case 0x143: //EntryStart
+				case 0x144: //EntryEnd
+					return true;
+
+				default:
+					break;
+				}
+				memcpy(entity[i].saved_mem, entity[i].player_mem, 0x2384);
+			}
+		}
+		Sleep(400);
+	}
+	if (GetAsyncKeyState(VK_INSERT)) {
+		for (uint16_t i = 0; i < 6; i++) {
+			if (entity[i].player_addr != NULL) {
+				memcpy(entity[i].player_addr, entity[i].saved_mem, 0x55C);
+				memcpy(entity[i].player_addr + 0x610, entity[i].saved_mem + 0x610, 0x1364);
+				memcpy(entity[i].player_addr + 0x1978, entity[i].saved_mem + 0x1978, 0x884);
+				memcpy(entity[i].player_addr + 0x2200, entity[i].saved_mem + 0x2200, 0x184);
+			}
+		}
+		Sleep(400);
+	}
 	return true;
 }
