@@ -182,6 +182,48 @@ bool SmashMain::init() {
 
 	return true;
 }
+
+bool checkState(uint16_t i) {
+	if (entity[i].player_addr != NULL) {
+		uint32_t chid = *reinterpret_cast<uint32_t*>(entity[i].player_addr + 0x04); //Load the character ID
+		uint32_t as = *reinterpret_cast<uint32_t*>(entity[i].player_addr + 0x10); //Load the action state
+
+		switch (_byteswap_ulong(chid)) {
+		case 0xD: //Samus
+			if (*reinterpret_cast<uint32_t*>(entity[i].player_addr + 0x223c) != 0) { //Grappled Entity
+				return false;
+			}
+			break;
+
+		case 0x6:
+		case 0x14:
+			if (*reinterpret_cast<uint32_t*>(entity[i].player_addr + 0x2238) != 0) { //Grappled Entity
+				return false;
+			}
+			break;
+
+		default:
+			break;
+		}
+
+		switch (_byteswap_ulong(as)) {
+		case 0xC: //Rebirth
+		case 0xD: //RebirthWait
+		case 0x142: //Entry
+		case 0x143: //EntryStart
+		case 0x144: //EntryEnd
+			return false;
+
+		default:
+			break;
+		}
+	}
+	else {
+		return false;
+	}
+	return true;
+}
+
 /* Step occurs every 10ms, so don't rely on this for sending packets on frame.
 */
 bool SmashMain::step() {
@@ -194,39 +236,7 @@ bool SmashMain::step() {
 	}
 	if (GetAsyncKeyState(VK_HOME)) {
 		for (uint16_t i = 0; i < 6; i++) {
-			if (entity[i].player_addr != NULL) {
-				uint32_t chid = *reinterpret_cast<uint32_t*>(entity[i].player_addr + 0x04); //Load the character ID
-				uint32_t as = *reinterpret_cast<uint32_t*>(entity[i].player_addr + 0x10); //Load the action state
-
-				switch (_byteswap_ulong(chid)) {
-				case 0xd: //Samus
-					if (*reinterpret_cast<uint32_t*>(entity[i].player_addr + 0x223c) != 0) { //Grappled Entity
-						return true;
-					}
-					break;
-
-				case 0x6:
-				case 0x14:
-					if (*reinterpret_cast<uint32_t*>(entity[i].player_addr + 0x2238) != 0) { //Grappled Entity
-						return true;
-					}
-					break;
-
-				default:
-					break;
-				}
-
-				switch (_byteswap_ulong(as)) {
-				case 0xC: //Rebirth
-				case 0xD: //RebirthWait
-				case 0x142: //Entry
-				case 0x143: //EntryStart
-				case 0x144: //EntryEnd
-					return true;
-
-				default:
-					break;
-				}
+			if (checkState(i)) {
 				memcpy(entity[i].saved_mem, entity[i].player_mem, 0x2384);
 			}
 		}
@@ -234,7 +244,7 @@ bool SmashMain::step() {
 	}
 	if (GetAsyncKeyState(VK_INSERT)) {
 		for (uint16_t i = 0; i < 6; i++) {
-			if (entity[i].player_addr != NULL) {
+			if (checkState(i)) {
 				memcpy(entity[i].player_addr, entity[i].saved_mem, 0x55C);
 				memcpy(entity[i].player_addr + 0x610, entity[i].saved_mem + 0x610, 0x1364);
 				memcpy(entity[i].player_addr + 0x1978, entity[i].saved_mem + 0x1978, 0x884);
