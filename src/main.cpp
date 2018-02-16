@@ -8,7 +8,6 @@ void hkSerialUpdate(hl::CpuContext *ctx);
 void hkSerialShutdown(hl::CpuContext *ctx);
 
 uintptr_t cache_invalidate = NULL;
-uintptr_t mem_getptr = NULL;
 uintptr_t g_serialupdate = NULL;
 uintptr_t g_serialshutdown = NULL;
 
@@ -31,8 +30,11 @@ Entity entity[6] = { NULL, NULL, NULL, NULL, NULL, NULL };
 //32 _byteswap_ulong(unsigned long value);
 //64 _byteswap_uint64(unsigned __int64 value);
 
-uintptr_t getPointer(unsigned int address) {
-	return ((uintptr_t(__thiscall*)(uintptr_t, unsigned int))mem_getptr)(NULL, address);
+typedef uint8_t*(__stdcall *getptr)(uint32_t addr);
+getptr mem_getptr;
+
+uint8_t* getPointer(uint32_t address) {
+	return mem_getptr(address);
 }
 
 
@@ -56,16 +58,16 @@ void cleanup() {
 }
 
 void updatePtrs() {
-	memlo = getPointer(0x80000000);
+	memlo = (uintptr_t)getPointer(0x80000000);
 
 	//Memory is going to be contiguous with memlo, but should probably just make a habit of checking w/ the function
-	nametagRegion = memlo + 0x045D850; //Start of the nametag list for writing
+	nametagRegion = (uintptr_t)getPointer(0x8045D850); //Start of the nametag list for writing
 
-	patchStart = memlo + 0x045D930; //This is the free region after nametags for say, a buffer overflow
+	patchStart = (uintptr_t)getPointer(0x8045D930); //This is the free region after nametags for say, a buffer overflow
 
-	firstEntity = memlo + 0x0BDA4A0; //This is a location the game stores a ptr to the first loaded entity
+	firstEntity = (uintptr_t)getPointer(0x80BDA4A0); //This is a location the game stores a ptr to the first loaded entity
 
-	timer = memlo + 0x046B6C4;
+	timer = (uintptr_t)getPointer(0x8046B6C4);
 	m_con.printf("[Core::Ptrs] Pointers loaded: %p, %p, %p, %p, %p\n", memlo, nametagRegion, patchStart, firstEntity, timer);
 }
 
@@ -77,11 +79,11 @@ void updatePlayerPtrs() {
 				addr = reinterpret_cast<uint32_t*>(entity[i - 1].entity_addr + 0x08); //Next entity is entity ptr + 0x0C
 			if (*addr == 0 || _byteswap_ulong(*addr) < 0x80000000)
 				break;
-			entity[i].entity_addr = memlo + (_byteswap_ulong(*addr) - 0x80000000);
+			entity[i].entity_addr = (uintptr_t)getPointer(_byteswap_ulong(*addr));
 			m_con.printf("[INFO] Entity %d MEM1: %p\n", i + 1, _byteswap_ulong(*addr));
 
 			addr = reinterpret_cast<uint32_t*>(entity[i].entity_addr + 0x2C); //Now we'll jump to their player struct
-			entity[i].player_addr = reinterpret_cast<char*>(memlo + (_byteswap_ulong(*addr) + 0x10 - 0x80000000)); //Start at 0x10 of the player struct, since everything prior isn't going to change
+			entity[i].player_addr = reinterpret_cast<char*>((uintptr_t)getPointer(_byteswap_ulong(*addr) + 0x10)); //Start at 0x10 of the player struct, since everything prior isn't going to change
 		}
 	}
 }
@@ -139,7 +141,7 @@ bool SmashMain::init() {
 	}
 	m_con.printf("[Core::Init] PPCCache::Invalidate(): %p\n", cache_invalidate);
 
-	mem_getptr = hl::FindPattern("48 83 EC 38 81 E1 FF FF FF 3F 81 F9 00 00 80 01 73 0E 8B C1");
+	mem_getptr = (getptr)hl::FindPattern("48 83 EC 38 81 E1 FF FF FF 3F 81 F9 00 00 80 01 73 0E 8B C1");
 	if (!mem_getptr) {
 		m_con.printf("[Core::Init] Memory::GetPointer pattern invalid\n");
 		return false;
@@ -181,6 +183,7 @@ bool SmashMain::init() {
 bool SmashMain::step() {
 	if (GetAsyncKeyState(VK_END) < 0) {
 		m_hooker.unhook(m_serialupdate);
+		m_hooker.unhook(m_serialshutdown);
 		m_con.printf("[Core::Cleanup] SerialInterface::UpdateDevices() hook removed\n");
 		cleanup();
 		return false;
