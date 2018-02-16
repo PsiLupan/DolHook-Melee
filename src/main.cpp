@@ -136,12 +136,12 @@ void hkSerialShutdown(hl::CpuContext *ctx) {
 bool SmashMain::init() {
 	m_con.create("SmashData");
 
-	cache_invalidate = hl::FindPattern("40 56 48 83 EC 20 F7 05 D0 C1 D4 00 00 80 00 00 8B F2 0F 84 67 03 00 00 48 89 5C 24 30");
+	cache_invalidate = hl::FindPattern("40 56 48 83 EC 20 F7 05 ?? ?? ?? ?? 00 80 00 00 8B F2 0F 84 67 03 00 00 48 89 5C 24 30");
 	if (!cache_invalidate) {
 		m_con.printf("[Core::Init] PPCCache::Invalidate pattern invalid\n");
 		return false;
 	}
-	m_con.printf("[Core::Init] PPCCache::Invalidate(): %p\n", cache_invalidate);
+	m_con.printf("[Core::Init] PowerPC::InstructionCache::Invalidate(): %p\n", cache_invalidate);
 
 	mem_getptr = (getptr)hl::FindPattern("48 83 EC 38 81 E1 FF FF FF 3F 81 F9 00 00 80 01 73 0E 8B C1");
 	if (!mem_getptr) {
@@ -150,7 +150,7 @@ bool SmashMain::init() {
 	}
 	m_con.printf("[Core::Init] Memory_GetPointer(): %p\n", mem_getptr);
 
-	g_serialupdate = hl::FindPattern("48 83 EC 28 48 8D 0D 85 FE A4 00 E8 E0 2E EF FF");
+	g_serialupdate = hl::FindPattern("48 83 EC 28 48 8D 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8B 0D ?? ?? ?? ??");
 	if (!g_serialupdate) {
 		m_con.printf("[Core::Init] SerialInterface::UpdateDevices() pattern invalid\n");
 		return false;
@@ -164,7 +164,7 @@ bool SmashMain::init() {
 	}
 	m_con.printf("[Core::Init] SerialInterface::UpdateDevices() hook successful\n");
 
-	g_serialshutdown = hl::FindPattern("48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 33 FF 48 8D 35 58 14 28 01");
+	g_serialshutdown = hl::FindPattern("48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 33 FF 48 8D 35 ?? ?? ?? ?? 8B DF");
 	if (!g_serialshutdown) {
 		m_con.printf("[Core::Init] SerialInterface::Shutdown() pattern invalid\n");
 		return false;
