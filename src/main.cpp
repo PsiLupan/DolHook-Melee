@@ -176,9 +176,10 @@ void hkSerialUpdate(hl::CpuContext *ctx) {
 }
 
 void hkSerialShutdown(hl::CpuContext *ctx) {
-	if(memlo != NULL)
+	if (memlo != NULL) {
 		UpdateMenuPresence();
 		cleanup();
+	}
 }
 
 void cleanupPlayerPtrs() {
