@@ -3,6 +3,7 @@
 #include "hacklib/Hooker.h"
 #include "hacklib/PatternScanner.h"
 #include "hacklib/Main.h"
+#include "hacklib/Timer.h"
 #include "discord_register.h"
 #include "discord-rpc.h"
 #include <cstdio>

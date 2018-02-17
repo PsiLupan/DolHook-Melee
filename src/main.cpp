@@ -12,6 +12,8 @@ void UpdateMatchPresence();
 bool checkState(uint16_t i);
 void updateEntities();
 void updatePlayerPtrs();
+char* getCurrentStage();
+uint32_t getGameTime();
 void updatePtrs();
 
 uintptr_t cache_invalidate = NULL;
@@ -22,7 +24,7 @@ uintptr_t memlo = NULL;
 uintptr_t nametagRegion = NULL;
 uintptr_t patchStart = NULL;
 uintptr_t firstEntity = NULL;
-uintptr_t timer = NULL;
+uintptr_t frame_timer = NULL;
 
 typedef uint8_t*(__stdcall *getptr)(uint32_t addr);
 getptr mem_getptr;
@@ -32,6 +34,8 @@ void hkSerialShutdown(hl::CpuContext *ctx);
 
 uint32_t numPlayers = 0;
 bool menu = true;
+
+hl::Timer timer;
 
 struct Entity
 {
@@ -89,7 +93,6 @@ bool SmashMain::init() {
 	}
 
 	cleanupPlayerPtrs();
-	InitDiscord();
 
 	return true;
 }
@@ -97,6 +100,10 @@ bool SmashMain::init() {
 /* Step occurs every 10ms, so don't rely on this for sending packets on frame.
 */
 bool SmashMain::step() {
+	if (!menu && numPlayers > 0 && timer.diff() > 17.0f) {
+		UpdateMatchPresence();
+		timer.reset();
+	}
 	if (GetAsyncKeyState(VK_END) < 0) {
 		m_hooker.unhook(m_serialupdate);
 		m_hooker.unhook(m_serialshutdown);
@@ -104,7 +111,7 @@ bool SmashMain::step() {
 		Discord_Shutdown();
 		return false;
 	}
-	if (GetAsyncKeyState(VK_HOME)) {
+	/*if (GetAsyncKeyState(VK_HOME)) {
 		for (uint16_t i = 0; i < 6; i++) {
 			if (checkState(i)) {
 				memcpy(entity[i].saved_mem, entity[i].player_mem, 0x2384);
@@ -122,7 +129,7 @@ bool SmashMain::step() {
 			}
 		}
 		Sleep(400);
-	}
+	}*/
 	return true;
 }
 
@@ -138,14 +145,15 @@ void hkSerialUpdate(hl::CpuContext *ctx) {
 				cleanupPlayerPtrs();
 				menu = true;
 			}
-			if (menu) {
+			if (menu || timer.diff() > 17.0f) {
 				UpdateMenuPresence();
+				timer.reset();
 				menu = false;
 			}
 			return;
 		}
 
-		addr = *reinterpret_cast<uint32_t*>(timer);
+		addr = *reinterpret_cast<uint32_t*>(frame_timer);
 		if (addr != 0) {
 			addr = *reinterpret_cast<uint32_t*>(firstEntity);
 			if (_byteswap_ulong(addr) > 0x80000000) {
@@ -155,6 +163,7 @@ void hkSerialUpdate(hl::CpuContext *ctx) {
 				else {
 					updatePlayerPtrs();
 					UpdateMatchPresence();
+					timer.reset();
 				}
 			}
 		}
@@ -186,9 +195,10 @@ void cleanup() {
 	nametagRegion = NULL;
 	patchStart = NULL;
 	firstEntity = NULL;
-	timer = NULL;
+	frame_timer = NULL;
 	cleanupPlayerPtrs();
 	m_con.printf("[Core::Cleanup] Invalidated VMEM Hooks\n");
+	Discord_Shutdown();
 }
 
 void updatePtrs() {
@@ -196,13 +206,12 @@ void updatePtrs() {
 
 	//Memory is going to be contiguous with memlo, but should probably just make a habit of checking w/ the function
 	nametagRegion = (uintptr_t)getPointer(0x8045D850); //Start of the nametag list for writing
-
 	patchStart = (uintptr_t)getPointer(0x8045D930); //This is the free region after nametags for say, a buffer overflow
-
 	firstEntity = (uintptr_t)getPointer(0x80BDA4A0); //This is a location the game stores a ptr to the first loaded entity
+	frame_timer = (uintptr_t)getPointer(0x8046B6C4);
 
-	timer = (uintptr_t)getPointer(0x8046B6C4);
 	m_con.printf("[Core::Ptrs] Pointers loaded: %p, %p, %p, %p, %p\n", memlo, nametagRegion, patchStart, firstEntity, timer);
+	InitDiscord();
 }
 
 void updatePlayerPtrs() {
@@ -228,6 +237,30 @@ void updateEntities() {
 		if (checkState(i)) {
 			memcpy(&entity[i].player_mem, entity[i].player_addr, 0x2384);
 		}
+	}
+}
+
+uint32_t getGameTime() {
+	return _byteswap_ulong(*reinterpret_cast<uint32_t*>(getPointer(0x8046B6C8)));
+}
+
+char* getCurrentStage() {
+	uint32_t stageid = _byteswap_ulong(*reinterpret_cast<uint32_t*>(getPointer(0x804D49E8)));
+	switch (stageid) {
+	case 0x2:
+		return "fountain";
+	case 0x3:
+		return "poke_stadium";
+	case 0x8:
+		return "yoshi_story";
+	case 0x1C:
+		return "dream_land";
+	case 0x1F:
+		return "battlefield";
+	case 0x20:
+		return "final_destination";
+	default:
+		return "melee";
 	}
 }
 
@@ -261,7 +294,7 @@ bool checkState(uint16_t i) {
 		case 0xFD: //LedgeGrab
 		case 0x142: //Entry
 		case 0x143: //EntryStart
-		case 0x144: //EntryEnd
+		case 0x144: //EntryEnds
 			return false;
 
 		default:
@@ -322,7 +355,6 @@ void UpdateMenuPresence()
 	discordPresence.state = "Selecting Characters";
 	sprintf(buffer, "Waiting in Lobby");
 	discordPresence.details = buffer;
-	discordPresence.startTimestamp = time(0);
 	discordPresence.largeImageKey = "melee";
 	discordPresence.smallImageKey = "melee_small";
 	Discord_UpdatePresence(&discordPresence);
@@ -337,8 +369,8 @@ void UpdateMatchPresence()
 	discordPresence.state = "In Match";
 	sprintf(buffer, "MELEE");
 	discordPresence.details = buffer;
-	discordPresence.startTimestamp = time(0);
-	discordPresence.largeImageKey = "melee";
+	discordPresence.endTimestamp = time(0) + getGameTime();
+	discordPresence.largeImageKey = getCurrentStage();
 	discordPresence.smallImageKey = "melee_small";
 	Discord_UpdatePresence(&discordPresence);
 }
