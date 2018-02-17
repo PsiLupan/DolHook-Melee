@@ -1,8 +1,8 @@
 #include "main.h"
 
 hl::StaticInit<class SmashMain> g_main;
-
 hl::ConsoleEx m_con;
+hl::Timer timer;
 
 void InitDiscord();
 void cleanupPlayerPtrs();
@@ -20,31 +20,33 @@ uintptr_t cache_invalidate = NULL;
 uintptr_t g_serialupdate = NULL;
 uintptr_t g_serialshutdown = NULL;
 
-uintptr_t memlo = NULL;
-uintptr_t nametagRegion = NULL;
-uintptr_t patchStart = NULL;
-uintptr_t firstEntity = NULL;
-uintptr_t frame_timer = NULL;
-
 typedef uint8_t*(__stdcall *getptr)(uint32_t addr);
 getptr mem_getptr;
 
 void hkSerialUpdate(hl::CpuContext *ctx);
 void hkSerialShutdown(hl::CpuContext *ctx);
 
+uintptr_t memlo = NULL;
+
+#define MEM1 0x80000000
+#define NAMETAG_REGION 0x8045D850
+#define PATCH_START 0x8045D930
+#define FIRST_ENTITY 0x80BDA4A0
+#define FRAME_TIMER 0x8046B6C4
+#define CURR_MENU 0x8065CC14
+#define CS_MELEE 0x8111F880
+
 uint32_t numPlayers = 0;
 bool menu = true;
-
-hl::Timer timer;
 
 struct Entity
 {
 	uintptr_t entity_addr;
-	char* player_addr;
+	uintptr_t player_addr;
 	unsigned char player_mem[0x2384];
 	unsigned char saved_mem[0x2384];
 };
-Entity entity[6] = { NULL, NULL, NULL, NULL, NULL, NULL };
+Entity entity[8];
 
 //16 _byteswap_ushort(unsigned short value);
 //32 _byteswap_ulong(unsigned long value);
@@ -100,10 +102,6 @@ bool SmashMain::init() {
 /* Step occurs every 10ms, so don't rely on this for sending packets on frame.
 */
 bool SmashMain::step() {
-	if (!menu && numPlayers > 0 && timer.diff() > 17.0f) {
-		UpdateMatchPresence();
-		timer.reset();
-	}
 	if (GetAsyncKeyState(VK_END) < 0) {
 		m_hooker.unhook(m_serialupdate);
 		m_hooker.unhook(m_serialshutdown);
@@ -139,8 +137,8 @@ uint8_t* getPointer(uint32_t address) {
 
 void hkSerialUpdate(hl::CpuContext *ctx) {
 	if (memlo != NULL) {
-		uint32_t addr = *reinterpret_cast<uint32_t*>(getPointer(0x8065CC14));
-		if (_byteswap_ulong(addr) == 0x8111F880) {
+		uint32_t addr = *(uint32_t*)(getPointer(CURR_MENU));
+		if (_byteswap_ulong(addr) == CS_MELEE) {
 			if (numPlayers > 0) {
 				cleanupPlayerPtrs();
 				menu = true;
@@ -153,12 +151,16 @@ void hkSerialUpdate(hl::CpuContext *ctx) {
 			return;
 		}
 
-		addr = *reinterpret_cast<uint32_t*>(frame_timer);
+		addr = *(uint32_t*)(getPointer(FRAME_TIMER));
 		if (addr != 0) {
-			addr = *reinterpret_cast<uint32_t*>(firstEntity);
-			if (_byteswap_ulong(addr) > 0x80000000) {
+			addr = *(uint32_t*)(getPointer(FIRST_ENTITY));
+			if (_byteswap_ulong(addr) > MEM1) {
 				if (numPlayers > 0) {
 					updateEntities();
+					if (!menu && timer.diff() > 17.0f) {
+						UpdateMatchPresence();
+						timer.reset();
+					}
 				}
 				else {
 					updatePlayerPtrs();
@@ -181,7 +183,7 @@ void hkSerialShutdown(hl::CpuContext *ctx) {
 
 void cleanupPlayerPtrs() {
 	numPlayers = 0;
-	for (uint16_t i = 0; i < 6; i++) {
+	for (uint16_t i = 0; i < 8; i++) {
 		entity[i].entity_addr = NULL;
 		entity[i].player_addr = NULL;
 		memset(entity[i].player_mem, 0, 0x2384);
@@ -192,60 +194,53 @@ void cleanupPlayerPtrs() {
 
 void cleanup() {
 	memlo = NULL;
-	nametagRegion = NULL;
-	patchStart = NULL;
-	firstEntity = NULL;
-	frame_timer = NULL;
 	cleanupPlayerPtrs();
 	m_con.printf("[Core::Cleanup] Invalidated VMEM Hooks\n");
 	Discord_Shutdown();
+	m_con.printf("[DISCORD] Shutdown\n");
 }
 
 void updatePtrs() {
-	memlo = (uintptr_t)getPointer(0x80000000);
+	memlo = (uintptr_t)getPointer(MEM1);
 
 	//Memory is going to be contiguous with memlo, but should probably just make a habit of checking w/ the function
-	nametagRegion = (uintptr_t)getPointer(0x8045D850); //Start of the nametag list for writing
-	patchStart = (uintptr_t)getPointer(0x8045D930); //This is the free region after nametags for say, a buffer overflow
-	firstEntity = (uintptr_t)getPointer(0x80BDA4A0); //This is a location the game stores a ptr to the first loaded entity
-	frame_timer = (uintptr_t)getPointer(0x8046B6C4);
 
-	m_con.printf("[Core::Ptrs] Pointers loaded: %p, %p, %p, %p, %p\n", memlo, nametagRegion, patchStart, firstEntity, timer);
+	m_con.printf("[Core::Ptrs] MEM1 Pointer: %p\n", memlo);
 	InitDiscord();
 }
 
 void updatePlayerPtrs() {
-	uint32_t addr = *reinterpret_cast<uint32_t*>(firstEntity);
-	if (_byteswap_ulong(addr) > 0x80000000) {
-		for (int i = 0; i < 6; i++) {
+	uint32_t addr = *(uint32_t*)(getPointer(FIRST_ENTITY));
+	if (_byteswap_ulong(addr) > MEM1) {
+		for (int i = 0; i < 8; i++) {
 			if (i > 0)
-				addr = *reinterpret_cast<uint32_t*>(entity[i - 1].entity_addr + 0x08); //Next entity is entity ptr + 0x08
-			if (_byteswap_ulong(addr) < 0x80000000)
+				addr = *(uint32_t*)(entity[i - 1].entity_addr + 0x08); //Next entity is entity ptr + 0x08
+			if (_byteswap_ulong(addr) < MEM1)
 				break;
 			entity[i].entity_addr = (uintptr_t)getPointer(_byteswap_ulong(addr));
 			m_con.printf("[INFO] Entity %d MEM1: %p\n", i + 1, _byteswap_ulong(addr));
 
-			addr = *reinterpret_cast<uint32_t*>(entity[i].entity_addr + 0x2C); //Now we'll jump to their player struct
-			entity[i].player_addr = reinterpret_cast<char*>((uintptr_t)getPointer(_byteswap_ulong(addr)));
+			addr = *(uint32_t*)(entity[i].entity_addr + 0x2C); //Now we'll jump to their player struct
+			entity[i].player_addr = (uintptr_t)getPointer(_byteswap_ulong(addr));
 			numPlayers += 1;
 		}
 	}
 }
 
 void updateEntities() {
-	for (uint16_t i = 0; i < 6; i++) {
+	for (uint16_t i = 0; i < 8; i++) {
 		if (checkState(i)) {
-			memcpy(&entity[i].player_mem, entity[i].player_addr, 0x2384);
+			memcpy(&entity[i].player_mem, (char*)entity[i].player_addr, 0x2384);
 		}
 	}
 }
 
 uint32_t getGameTime() {
-	return _byteswap_ulong(*reinterpret_cast<uint32_t*>(getPointer(0x8046B6C8)));
+	return _byteswap_ulong(*(uint32_t*)(getPointer(0x8046B6C8)));
 }
 
 char* getCurrentStage() {
-	uint32_t stageid = _byteswap_ulong(*reinterpret_cast<uint32_t*>(getPointer(0x804D49E8)));
+	uint32_t stageid = _byteswap_ulong(*(uint32_t*)(getPointer(0x804D49E8)));
 	switch (stageid) {
 	case 0x2:
 		return "fountain";
@@ -266,19 +261,19 @@ char* getCurrentStage() {
 
 bool checkState(uint16_t i) {
 	if (entity[i].player_addr != NULL) {
-		uint32_t chid = *reinterpret_cast<uint32_t*>(entity[i].player_addr + 0x04); //Load the character ID
-		uint32_t as = *reinterpret_cast<uint32_t*>(entity[i].player_addr + 0x10); //Load the action state
+		uint32_t chid = *(uint32_t*)(entity[i].player_addr + 0x04); //Load the character ID
+		uint32_t as = *(uint32_t*)(entity[i].player_addr + 0x10); //Load the action state
 
 		switch (_byteswap_ulong(chid)) {
 		case 0xD: //Samus
-			if (*reinterpret_cast<uint32_t*>(entity[i].player_addr + 0x223c) != 0) { //Grappled Entity
+			if (*(uint32_t*)(entity[i].player_addr + 0x223c) != 0) { //Grappled Entity
 				return false;
 			}
 			break;
 
 		case 0x6:
 		case 0x14:
-			if (*reinterpret_cast<uint32_t*>(entity[i].player_addr + 0x2238) != 0) { //Grappled Entity
+			if (*(uint32_t*)(entity[i].player_addr + 0x2238) != 0) { //Grappled Entity
 				return false;
 			}
 			break;
